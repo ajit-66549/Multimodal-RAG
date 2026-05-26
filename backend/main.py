@@ -1,12 +1,13 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
-from pathlib import Path
 from uuid import uuid4
+from pathlib import Path
+from sqlalchemy import select
 from contextlib import asynccontextmanager
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 
 from app.database import Base, engine, get_db
-from app.models import Documents
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from app.models import Documents, DocumentChunk
+from app.ingestion import process_pdf_into_chunks
 
 UPLOAD_DIR = Path("../storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -76,3 +77,46 @@ async def list_documents(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Documents))
     documents = result.scalars().all()
     return documents
+
+# process pdf document endpoint
+@app.post("/document/{document_id}/process")
+async def process_document(document_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Documents).where(Documents.id == document_id))
+    document = result.scalar_one_or_none()
+    
+    if not document:
+        raise HTTPException(status_code=40, detail="Document not found")
+    
+    if document.file_type != ".pdf":
+        raise HTTPException(status_code=400, detail="Only PDF processing is supported right now")
+    
+    document.status = "processing"
+    db.commit()
+    
+    chunks = process_pdf_into_chunks(document.storage_path)
+    
+    for index, chunk in enumerate(chunks, start=1):
+        db_chunk = DocumentChunk(
+            document_id=document.id,
+            page_number=chunk["page_number"],
+            chunk_index=index,
+            text=chunk["text"],
+            token_count=chunk["token_count"]
+        )
+        db.add(db_chunk)
+        
+    document.chunk_count = len(chunks)
+    document.status = "ready"
+    await db.commit()
+    
+    return {
+        "document_id": document.id,
+        "status": document.status,
+        "chunk_token": document.chunk_count
+    }
+    
+@app.get("/documents/{document_id}/chunks")
+async def list_document_chunks(document_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == document_id).order_by(DocumentChunk.chunk_index))
+    chunks = result.scalars().all()
+    return chunks
