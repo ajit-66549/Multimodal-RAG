@@ -8,6 +8,8 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 from app.database import Base, engine, get_db
 from app.models import Documents, DocumentChunk
 from app.ingestion import process_pdf_into_chunks
+from app.embedding_service import create_embeddings
+from app.vector_store import add_chunk_embedding, query_chunks
 
 UPLOAD_DIR = Path("../storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -120,3 +122,38 @@ async def list_document_chunks(document_id: str, db: AsyncSession = Depends(get_
     result = await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == document_id).order_by(DocumentChunk.chunk_index))
     chunks = result.scalars().all()
     return chunks
+
+# embed all the chunks
+@app.post("/document/{document_id}/embed")
+async def embed_document_chunks(document_id: str, db: AsyncSession = Depends(get_db)):
+    response = await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == document_id).order_by(DocumentChunk.chunk_index))
+    chunks = response.scalars().all()
+    
+    if not chunks:
+        raise HTTPException(status_code=404, detail="No chunks found for this document")
+    
+    for chunk in chunks:
+        embedding = create_embeddings(chunk.text)
+        
+        add_chunk_embedding(
+            chunk_id=chunk.id,
+            text=chunk.text,
+            embedding=embedding,
+            metadata={
+                "document_id": chunk.document_id,
+                "page_number": chunk.page_number,
+                "chunk_index": chunk.chunk_index
+            }
+        )
+    
+    return {
+        "document_id": document_id,
+        "embedded_chunks": len(chunks)
+    }
+    
+@app.get("/retrieve")
+async def retrieve_chunk(question: str, top_k: int = 5):
+    question_embedding = create_embeddings(question)
+    results = query_chunks(question_embedding=question_embedding, top_k=top_k)
+    
+    return results
