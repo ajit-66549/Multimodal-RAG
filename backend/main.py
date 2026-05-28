@@ -10,6 +10,7 @@ from app.models import Documents, DocumentChunk
 from app.ingestion import process_pdf_into_chunks
 from app.embedding_service import create_embeddings
 from app.vector_store import add_chunk_embedding, query_chunks
+from app.llm_services import generate_answer
 
 UPLOAD_DIR = Path("../storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -157,3 +158,47 @@ async def retrieve_chunk(question: str, top_k: int = 5):
     results = query_chunks(question_embedding=question_embedding, top_k=top_k)
     
     return results
+
+# call llm for answer
+@app.post("/chat")
+async def chat(question: str, top_k: int = 5):
+    # get question embeddings
+    question_embedding = create_embeddings(question)
+    
+    # get relevant chunks
+    results = query_chunks(question_embedding, top_k)
+    
+    documents = results["documents"][0]
+    metadatas = results["metadatas"][0]
+    
+    # create context for llm
+    context_parts = []
+    for doc, metadata in zip(documents, metadatas):
+        context_parts.append(
+            f"""
+Source:
+Document ID: {metadata["document_id"]}
+Page: {metadata["page_number"]}
+Chunk: {metadata["chunk_index"]}
+
+Text:
+{doc}
+"""
+        )
+    
+    context = "".join(context_parts)
+    answer = generate_answer(question, context)
+    
+    sources = []
+    for metadata in metadatas:
+        sources.append({
+            "document_id": metadata["document_id"],
+            "page_number": metadata["page_number"],
+            "chunk_index": metadata["chunk_index"]
+        })
+
+    return {
+        "question": question,
+        "answer": answer,
+        "sources": sources
+    }
