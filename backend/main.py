@@ -11,6 +11,7 @@ from app.ingestion import process_pdf_into_chunks
 from app.embedding_service import create_embeddings
 from app.vector_store import add_chunk_embedding, query_chunks
 from app.llm_services import generate_answer
+from app.csv_ingestion import process_csv_into_chunks
 
 UPLOAD_DIR = Path("../storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -90,18 +91,20 @@ async def process_document(document_id: str, db: AsyncSession = Depends(get_db))
     if not document:
         raise HTTPException(status_code=40, detail="Document not found")
     
-    if document.file_type != ".pdf":
-        raise HTTPException(status_code=400, detail="Only PDF processing is supported right now")
+    if document.file_type == ".pdf":
+        chunks = process_pdf_into_chunks(document.storage_path)
+    elif document.file_type == ".csv":
+        chunks = process_csv_into_chunks(document.storage_path)
+    else:
+        raise HTTPException(status_code=400, detail="Only PDF and CSV processing are supported right now")
     
     document.status = "processing"
     db.commit()
     
-    chunks = process_pdf_into_chunks(document.storage_path)
-    
     for index, chunk in enumerate(chunks, start=1):
         db_chunk = DocumentChunk(
             document_id=document.id,
-            page_number=chunk["page_number"],
+            page_number=chunk.get("page_number", 0),
             chunk_index=index,
             text=chunk["text"],
             token_count=chunk["token_count"]
