@@ -6,12 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 
 from app.database import Base, engine, get_db
-from app.models import Documents, DocumentChunk
+from app.models import Documents, DocumentChunk, DocumentAsset
 from app.ingestion import process_pdf_into_chunks
 from app.embedding_service import create_embeddings
 from app.vector_store import add_chunk_embedding, query_chunks
 from app.llm_services import generate_answer
 from app.csv_ingestion import process_csv_into_chunks
+from app.image_extraction import extract_pdf_page_images
 
 UPLOAD_DIR = Path("../storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -205,3 +206,42 @@ Text:
         "answer": answer,
         "sources": sources
     }
+    
+@app.post("/documents/{document_id}/extract-images")
+async def extract_document_images(document_id: str, db:AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Documents).where(Documents.id == document_id))
+    
+    document = result.scalar_one_or_none()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if document.file_type != ".pdf":
+        raise HTTPException(status_code=400, detail="Only PDF image extraction is supported right now")
+    
+    assets = extract_pdf_page_images(document.storage_path, document_id)
+    
+    for asset in assets:
+        db_asset = DocumentAsset(
+            document_id=document.id,
+            page_number=asset["page_number"],
+            asset_type=asset["asset_type"],
+            asset_path=asset["asset_path"],
+        )
+        db.add(db_asset)
+        
+    await db.commit()
+    
+    return {
+        "document_id": document_id,
+        "extracted_assets": len(assets),
+        "assets": assets
+    }
+    
+@app.get("/documents/{document_id}/assets")
+async def list_documeny_assets(document_id: str, db:AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DocumentAsset).where(DocumentAsset.document_id == document_id)
+                              .order_by(DocumentAsset.page_number))
+    
+    assets = result.scalars().all()
+    return assets

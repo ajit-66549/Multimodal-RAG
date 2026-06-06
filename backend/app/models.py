@@ -30,3 +30,15 @@ class DocumentChunk(Base):
     token_count: Mapped[int] = mapped_column(Integer)
     
     document = relationship("Documents")
+    
+class DocumentAsset(Base):
+    __tablename__ = "document_assets"
+        
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    document_id: Mapped[str] = mapped_column(String, ForeignKey("documents.id"), nullable=False)
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    asset_type: Mapped[str] = mapped_column(String, nullable=False)
+    asset_path: Mapped[str] = mapped_column(String, nullable=False)
+    caption: Mapped[str | None] = mapped_column(Text, nullable=True)
+        
+    document = relationship("Documents")
