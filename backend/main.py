@@ -13,6 +13,7 @@ from app.vector_store import add_chunk_embedding, query_chunks
 from app.llm_services import generate_answer
 from app.csv_ingestion import process_csv_into_chunks
 from app.image_extraction import extract_pdf_page_images
+from app.ocr_service import extract_text_from_image
 
 UPLOAD_DIR = Path("../storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -245,3 +246,30 @@ async def list_documeny_assets(document_id: str, db:AsyncSession = Depends(get_d
     
     assets = result.scalars().all()
     return assets
+
+@app.post("/documents/{document_id}/ocr-assets")
+async def ocr_document_assets(document_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DocumentAsset).where(DocumentAsset.document_id == document_id).order_by(DocumentAsset.page_number))
+    assets = result.scalars().all()
+    
+    if not assets:
+        raise HTTPException(status_code=404, detail="No assets found for this document")
+    
+    updated_assets = []
+    
+    for asset in assets:
+        ocr_text = extract_text_from_image(asset.asset_path)
+        asset.caption = ocr_text
+        updated_assets.append({
+            "asset_id": asset.id,
+            "page_number": asset.page_number,
+            "caption_preview": asset.caption
+        })
+        
+        await db.commit()
+        
+    return {
+        "document_id": document_id,
+        "ocr_assets": len(updated_assets),
+        "assets": updated_assets
+    }
