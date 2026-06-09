@@ -185,7 +185,8 @@ async def chat(question: str, top_k: int = 5):
 Source:
 Document ID: {metadata["document_id"]}
 Page: {metadata["page_number"]}
-Chunk: {metadata["chunk_index"]}
+Source Type: {metadata.get("source_type", "unknown")}
+Chunk: {metadata.get("chunk_index", "N/A")}
 
 Text:
 {doc}
@@ -197,11 +198,21 @@ Text:
     
     sources = []
     for metadata in metadatas:
-        sources.append({
+        source = {
             "document_id": metadata["document_id"],
             "page_number": metadata["page_number"],
-            "chunk_index": metadata["chunk_index"]
-        })
+            "source_type": metadata.get("source_type")
+        }
+        
+        if metadata.get("source_type") == "text_chunk":
+            source["chunk_index"] = metadata.get("chunk_index")
+
+        elif metadata.get("source_type") == "asset":
+            source["asset_id"] = metadata.get("asset_id")
+            source["asset_type"] = metadata.get("asset_type")
+            source["asset_path"] = metadata.get("asset_path")
+
+        sources.append(source)
 
     return {
         "question": question,
