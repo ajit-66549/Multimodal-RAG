@@ -26,3 +26,11 @@ def query_chunks(question_embedding: list[float], top_k: int = 5, document_ids: 
         n_results=top_k,
         where=where_filter
     )
+    
+def add_asset_embedding(asset_id: str, text: str, embedding: list[float], metadata: dict):
+    collection.add(
+        ids=[asset_id],
+        documents=[text],
+        embeddings=[embedding],
+        metadatas=[metadata]
+    )

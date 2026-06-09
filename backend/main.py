@@ -9,7 +9,7 @@ from app.database import Base, engine, get_db
 from app.models import Documents, DocumentChunk, DocumentAsset
 from app.ingestion import process_pdf_into_chunks
 from app.embedding_service import create_embeddings
-from app.vector_store import add_chunk_embedding, query_chunks
+from app.vector_store import add_chunk_embedding, query_chunks, add_asset_embedding
 from app.llm_services import generate_answer
 from app.csv_ingestion import process_csv_into_chunks
 from app.image_extraction import extract_pdf_page_images
@@ -148,7 +148,8 @@ async def embed_document_chunks(document_id: str, db: AsyncSession = Depends(get
             metadata={
                 "document_id": chunk.document_id,
                 "page_number": chunk.page_number,
-                "chunk_index": chunk.chunk_index
+                "chunk_index": chunk.chunk_index,
+                "source_type": "text_chunk"
             }
         )
     
@@ -272,4 +273,42 @@ async def ocr_document_assets(document_id: str, db: AsyncSession = Depends(get_d
         "document_id": document_id,
         "ocr_assets": len(updated_assets),
         "assets": updated_assets
+    }
+    
+@app.post("/dpcuments/{document_id}/embed-assets")
+async def embed_document_assets(document_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DocumentAsset).where(DocumentAsset.document_id == document_id).order_by(DocumentAsset.page_number))
+    assets = result.scalars().all()
+    
+    if not assets:
+        raise HTTPException(status_code=404, detail="Assets not found for this document")
+    
+    embedded_assets = []
+    
+    for asset in assets:
+        if not asset.caption or not asset.caption.strip():
+            continue
+        
+        embedding = create_embeddings(asset.caption)
+        
+        add_asset_embedding(asset_id=asset.id, text=asset.caption, embedding=embedding,
+                            metadata={
+                                "document_id": asset.document_id,
+                                "asset_id": asset.id,
+                                "page_number": asset.page_number,
+                                "asset_type": asset.asset_type,
+                                "asset_path": asset.asset_path,
+                                "source_type": "asset"
+                            })
+        
+        embedded_assets.append({
+            "asset_id": asset.id,
+            "page_number": asset.page_number,
+            "asset_type": asset.asset_type
+        })
+    
+    return {
+        "document_id": document_id,
+        "embedded_assets": len(embedded_assets),
+        "assets": embedded_assets
     }
