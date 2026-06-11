@@ -4,6 +4,7 @@ from sqlalchemy import select
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
+from fastapi.responses import FileResponse
 
 from app.database import Base, engine, get_db
 from app.models import Documents, DocumentChunk, DocumentAsset
@@ -341,3 +342,15 @@ async def embed_document_assets(document_id: str, db: AsyncSession = Depends(get
         "embedded_assets": len(embedded_assets),
         "assets": embedded_assets
     }
+    
+@app.get("/assets/{asset_id}")
+async def get_asset(asset_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DocumentAsset).where(DocumentAsset.id == asset_id))
+    asset = result.scalar_one_or_none()
+    
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    
+    return FileResponse(path=asset.asset_path,
+                        media_type="Image/png",
+                        )
