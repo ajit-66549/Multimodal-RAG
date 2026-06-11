@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 from fastapi.responses import FileResponse
+from typing import Annotated
+from fastapi import Query
 
 from app.database import Base, engine, get_db
 from app.models import Documents, DocumentChunk, DocumentAsset
@@ -168,12 +170,12 @@ async def retrieve_chunk(question: str, top_k: int = 5):
 
 # call llm for answer
 @app.post("/chat")
-async def chat(question: str, top_k: int = 5):
+async def chat(question: str, top_k: int = 5, document_id: Annotated[list[str] | None, Query()] = None):
     # get question embeddings
     question_embedding = create_embeddings(question)
     
     # get relevant chunks
-    results = query_chunks(question_embedding, top_k)
+    results = query_chunks(question_embedding, top_k, document_ids=document_id)
     
     documents = results["documents"][0]
     metadatas = results["metadatas"][0]
@@ -212,9 +214,11 @@ Text:
             source["chunk_index"] = metadata.get("chunk_index")
 
         elif source_type == "asset":
+            asset_id = metadata.get("asset_id")
             source["asset_id"] = metadata.get("asset_id")
             source["asset_type"] = metadata.get("asset_type")
             source["asset_path"] = metadata.get("asset_path")
+            source["image_url"] = f"/assets/{asset_id}"
 
         sources.append(source)
         
