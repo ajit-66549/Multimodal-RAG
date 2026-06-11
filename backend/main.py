@@ -197,27 +197,45 @@ Text:
     answer = generate_answer(question, context)
     
     sources = []
-    for metadata in metadatas:
+    for doc, metadata in zip(documents, metadatas):
+        source_type = metadata.get("source_type", "text_chunk")
+        
         source = {
             "document_id": metadata["document_id"],
             "page_number": metadata["page_number"],
-            "source_type": metadata.get("source_type")
+            "source_type": source_type,
+            "preview": doc[:300]
         }
         
-        if metadata.get("source_type") == "text_chunk":
+        if source_type == "text_chunk":
             source["chunk_index"] = metadata.get("chunk_index")
 
-        elif metadata.get("source_type") == "asset":
+        elif source_type == "asset":
             source["asset_id"] = metadata.get("asset_id")
             source["asset_type"] = metadata.get("asset_type")
             source["asset_path"] = metadata.get("asset_path")
 
         sources.append(source)
+        
+        unique_sources = []
+        seen = set()
+        
+        for source in sources:
+            key = (
+                source.get("document_id"),
+                source.get("page_number"),
+                source.get("source_type"),
+                source.get("chunk_index"),
+                source.get("asset_id")
+            )
+            if key not in seen:
+                seen.add(key)
+                unique_sources.append(source)
 
     return {
         "question": question,
         "answer": answer,
-        "sources": sources
+        "sources": unique_sources
     }
     
 @app.post("/documents/{document_id}/extract-images")
