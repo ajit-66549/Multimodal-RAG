@@ -88,6 +88,16 @@ async def list_documents(db: AsyncSession = Depends(get_db)):
     documents = result.scalars().all()
     return documents
 
+@app.get("/documents/{documents_id}")
+async def get_document(document_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Documents).where(Documents.id == document_id))
+    document = result.scalar_one_or_none()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    return document
+
 # process pdf document endpoint
 @app.post("/document/{document_id}/process")
 async def process_document(document_id: str, db: AsyncSession = Depends(get_db)):
