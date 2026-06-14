@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 from fastapi.responses import FileResponse
 from typing import Annotated
 from fastapi import Query
+from datetime import datetime, timezone
 
 from app.database import Base, engine, get_db
 from app.models import Documents, DocumentChunk, DocumentAsset
@@ -96,35 +97,44 @@ async def process_document(document_id: str, db: AsyncSession = Depends(get_db))
     if not document:
         raise HTTPException(status_code=40, detail="Document not found")
     
-    if document.file_type == ".pdf":
-        chunks = process_pdf_into_chunks(document.storage_path)
-    elif document.file_type == ".csv":
-        chunks = process_csv_into_chunks(document.storage_path)
-    else:
-        raise HTTPException(status_code=400, detail="Only PDF and CSV processing are supported right now")
+    try:
+        document.status = "processing"
+        document.error_message = None
+        await db.commit()
     
-    document.status = "processing"
-    db.commit()
+        if document.file_type == ".pdf":
+            chunks = process_pdf_into_chunks(document.storage_path)
+        elif document.file_type == ".csv":
+            chunks = process_csv_into_chunks(document.storage_path)
+        else:
+            raise HTTPException(status_code=400, detail="Only PDF and CSV processing are supported right now")
     
-    for index, chunk in enumerate(chunks, start=1):
-        db_chunk = DocumentChunk(
-            document_id=document.id,
-            page_number=chunk.get("page_number", 0),
-            chunk_index=index,
-            text=chunk["text"],
-            token_count=chunk["token_count"]
-        )
-        db.add(db_chunk)
+        for index, chunk in enumerate(chunks, start=1):
+            db_chunk = DocumentChunk(
+                document_id=document.id,
+                page_number=chunk.get("page_number", 0),
+                chunk_index=index,
+                text=chunk["text"],
+                token_count=chunk["token_count"]
+            )
+            db.add(db_chunk)
         
-    document.chunk_count = len(chunks)
-    document.status = "ready"
-    await db.commit()
+        document.chunk_count = len(chunks)
+        document.status = "ready"
+        document.processed_at = datetime.now(timezone.utc)
+        await db.commit()
     
-    return {
-        "document_id": document.id,
-        "status": document.status,
-        "chunk_token": document.chunk_count
-    }
+        return {
+            "document_id": document.id,
+            "status": document.status,
+            "chunk_token": document.chunk_count,
+            "processed_at": document.processed_at
+        }
+    except Exception as e:
+        document.status = "failed"
+        document.error_message = str(e)
+        await db.commit()
+        raise
     
 @app.get("/documents/{document_id}/chunks")
 async def list_document_chunks(document_id: str, db: AsyncSession = Depends(get_db)):
