@@ -13,7 +13,7 @@ from app.database import Base, engine, get_db
 from app.models import Documents, DocumentChunk, DocumentAsset
 from app.ingestion import process_pdf_into_chunks
 from app.embedding_service import create_embeddings
-from app.vector_store import add_chunk_embedding, query_chunks, add_asset_embedding
+from app.vector_store import add_chunk_embedding, query_chunks, add_asset_embedding, delete_document_embeddings
 from app.llm_services import generate_answer
 from app.csv_ingestion import process_csv_into_chunks
 from app.image_extraction import extract_pdf_page_images
@@ -180,6 +180,40 @@ async def embed_document_chunks(document_id: str, db: AsyncSession = Depends(get
         "document_id": document_id,
         "embedded_chunks": len(chunks)
     }
+    
+@app.delete("/documents/{document_id}")
+async def delete_document(document_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Documents).where(Documents.id == document_id))
+    document = result.scalar_one_or_none()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not Found to delete")
+    
+    document_chunks = await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == document_id))
+    chunks = document_chunks.scalars().all()
+    
+    document_assets = await db.execute(select(DocumentAsset).where(DocumentAsset.document_id == document_id))
+    assets = document_assets.scalars().all()
+    
+    delete_document_embeddings(document_id)
+    
+    for asset in assets:
+        asset_path = Path(asset.asset_path)
+        if asset_path.exists():
+            asset_path.unlink()
+            
+        await db.delete(asset)
+        
+    for chunk in chunks:
+        await db.delete(chunk)
+        
+    await db.delete(document)
+    await db.commit()
+    
+    return {
+        "document_id": document_id,
+        "message": "Document deleted successfully"
+    }
+    
     
 @app.get("/retrieve")
 async def retrieve_chunk(question: str, top_k: int = 5):

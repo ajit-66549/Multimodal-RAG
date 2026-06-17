@@ -34,3 +34,6 @@ def add_asset_embedding(asset_id: str, text: str, embedding: list[float], metada
         embeddings=[embedding],
         metadatas=[metadata]
     )
+    
+def delete_document_embeddings(document_id: str):
+    collection.delete(where={"document_id": document_id})
