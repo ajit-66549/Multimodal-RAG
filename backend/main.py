@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from typing import Annotated
 from fastapi import Query
 from datetime import datetime, timezone
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine, get_db
 from app.models import Documents, DocumentChunk, DocumentAsset
@@ -31,6 +32,14 @@ async def lifespan(app: FastAPI):
     yield
     
 app = FastAPI(title="HPC Multimodal RAG Analyzer", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
     
 # health check endpoint
 @app.get("/health")
