@@ -20,3 +20,10 @@ def get_s3_object_byte(key: str) -> bytes:
 
 def delete_s3_object(key: str):
     s3_client.delete_object(Bucket=AWS_S3_BUCKET, Key=key)
+    
+def generate_presigned_URL(key: str, expired_in: int = 3600) -> str:
+    return s3_client.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={"Bucket": AWS_S3_BUCKET, "Key": key},
+        ExpiresIn=expired_in,
+    )
