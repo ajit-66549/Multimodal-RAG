@@ -1,16 +1,14 @@
 from uuid import uuid4
 from pathlib import Path
 from sqlalchemy import select
-from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
-from fastapi.responses import Response
 from typing import Annotated
 from fastapi import Query
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import Base, engine, get_db
+from app.database import get_db
 from app.models import Documents, DocumentChunk, DocumentAsset
 from app.ingestion import process_pdf_into_chunks
 from app.embedding_service import create_embeddings
@@ -27,13 +25,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".pdf", ".csv", ".txt", ".png", ".jpg", ".jpeg"}
     
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-    
-app = FastAPI(title="HPC Multimodal RAG Analyzer", lifespan=lifespan)
+app = FastAPI(title="HPC Multimodal RAG Analyzer")
 
 app.add_middleware(
     CORSMiddleware,
