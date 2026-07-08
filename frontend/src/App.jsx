@@ -11,6 +11,7 @@ function App() {
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [assetUrls, setAssetUrls] = useState({});
 
   const fetchDocuments = async () => {
     try {
@@ -68,6 +69,21 @@ function App() {
     }
   };
 
+  const loadAssetUrl = async (assetId) => {
+    if (assetUrls[assetId]) return;
+
+    try {
+      const response = await api.get(`/assets/${assetId}`);
+
+      setAssetUrls((prev) => ({
+        ...prev,
+        [assetId]: response.data.image_url,
+      }));
+    } catch (error) {
+      console.error("Failed to load asset URL:", error);
+    }
+  };
+
   const askQuestion = async () => {
     if (!question.trim()) {
       alert("Enter a question");
@@ -93,6 +109,11 @@ function App() {
 
       setAnswer(response.data.answer);
       setSources(response.data.sources);
+      response.data.sources.forEach((source) => {
+        if (source.asset_id) {
+          loadAssetUrl(source.asset_id);
+        }
+      });
     } catch (error) {
       console.error(error);
       alert("Failed to get answer");
@@ -211,9 +232,9 @@ function App() {
 
                   <p>{source.preview}</p>
 
-                  {source.image_url && (
+                  {source.asset_id && assetUrls[source.asset_id] && (
                     <img
-                      src={`http://127.0.0.1:8000${source.image_url}`}
+                      src={assetUrls[source.asset_id]}
                       alt="Retrieved source"
                       width="300"
                     />
