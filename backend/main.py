@@ -4,7 +4,7 @@ from sqlalchemy import select
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from typing import Annotated
 from fastapi import Query
 from datetime import datetime, timezone
@@ -19,6 +19,8 @@ from app.llm_services import generate_answer
 from app.csv_ingestion import process_csv_into_chunks
 from app.image_extraction import extract_pdf_page_images
 from app.ocr_service import extract_text_from_image
+
+from app.s3_service import upload_file_to_s3, get_s3_object_byte, generate_presigned_URL
 
 UPLOAD_DIR = Path("../storage/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -285,20 +287,20 @@ Text:
 
         sources.append(source)
         
-        unique_sources = []
-        seen = set()
+    unique_sources = []
+    seen = set()
         
-        for source in sources:
-            key = (
-                source.get("document_id"),
-                source.get("page_number"),
-                source.get("source_type"),
-                source.get("chunk_index"),
-                source.get("asset_id")
-            )
-            if key not in seen:
-                seen.add(key)
-                unique_sources.append(source)
+    for source in sources:
+        key = (
+            source.get("document_id"),
+            source.get("page_number"),
+            source.get("source_type"),
+            source.get("chunk_index"),
+            source.get("asset_id")
+        )
+        if key not in seen:
+            seen.add(key)
+            unique_sources.append(source)
 
     return {
         "question": question,
@@ -321,14 +323,15 @@ async def extract_document_images(document_id: str, db:AsyncSession = Depends(ge
     assets = extract_pdf_page_images(document.storage_path, document_id)
     
     for asset in assets:
+        s3_key = f"document-assets/{document.id}/page-{asset["page_number"]}.png"
+        upload_file_to_s3(filename=asset["asset_path"], key=s3_key)
         db_asset = DocumentAsset(
             document_id=document.id,
             page_number=asset["page_number"],
             asset_type=asset["asset_type"],
-            asset_path=asset["asset_path"],
+            asset_path=s3_key,
         )
         db.add(db_asset)
-        
     await db.commit()
     
     return {
@@ -418,6 +421,6 @@ async def get_asset(asset_id: str, db: AsyncSession = Depends(get_db)):
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     
-    return FileResponse(path=asset.asset_path,
-                        media_type="Image/png",
-                        )
+    presigned_url = generate_presigned_URL(asset.asset_path)
+    
+    return {"asset_id": asset.id, "image_url": presigned_url}
