@@ -5,7 +5,7 @@ collection = chroma_client.get_or_create_collection(name="hpc_document_chunks")
 
 def add_chunk_embedding(chunk_id: int, text: str, embedding: list[float], metadata: dict):
     collection.add(
-        ids=[chunk_id],
+        ids=[str(chunk_id)],
         documents=[text],
         embeddings=[embedding],
         metadatas=[metadata]

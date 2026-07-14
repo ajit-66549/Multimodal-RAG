@@ -75,7 +75,7 @@ async def upload_documents(file: UploadFile = File(...), db: AsyncSession = Depe
     
     db.add(document)
     await db.commit()
-    db.refresh(document)
+    await db.refresh(document)
         
     return {
         "document_id": document_id,
@@ -102,13 +102,13 @@ async def get_document(document_id: str, db: AsyncSession = Depends(get_db)):
     return document
 
 # process pdf document endpoint
-@app.post("/document/{document_id}/process")
+@app.post("/document/{document_id}/process", include_in_schema=False)
 async def process_document(document_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Documents).where(Documents.id == document_id))
     document = result.scalar_one_or_none()
     
     if not document:
-        raise HTTPException(status_code=40, detail="Document not found")
+        raise HTTPException(status_code=404, detail="Document not found")
     
     try:
         document.status = "processing"
@@ -156,13 +156,16 @@ async def list_document_chunks(document_id: str, db: AsyncSession = Depends(get_
     return chunks
 
 # embed all the chunks
-@app.post("/document/{document_id}/embed")
+@app.post("/document/{document_id}/embed", include_in_schema=False)
 async def embed_document_chunks(document_id: str, db: AsyncSession = Depends(get_db)):
     response = await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == document_id).order_by(DocumentChunk.chunk_index))
     chunks = response.scalars().all()
     
     if not chunks:
-        raise HTTPException(status_code=404, detail="No chunks found for this document")
+        return {
+            "document_id": document_id,
+            "embedded_chunks": 0
+        }
     
     for chunk in chunks:
         embedding = create_embeddings(chunk.text)
@@ -315,7 +318,7 @@ async def extract_document_images(document_id: str, db:AsyncSession = Depends(ge
     assets = extract_pdf_page_images(document.storage_path, document_id)
     
     for asset in assets:
-        s3_key = f"document-assets/{document.id}/page-{asset["page_number"]}.png"
+        s3_key = f"document-assets/{document.id}/page-{asset['page_number']}.png"
         upload_file_to_s3(filename=asset["asset_path"], key=s3_key)
         db_asset = DocumentAsset(
             document_id=document.id,
@@ -351,7 +354,7 @@ async def ocr_document_assets(document_id: str, db: AsyncSession = Depends(get_d
     updated_assets = []
     
     for asset in assets:
-        ocr_text = extract_text_from_image(asset.asset_path)
+        ocr_text = extract_text_from_image(get_s3_object_byte(asset.asset_path))
         asset.caption = ocr_text
         updated_assets.append({
             "asset_id": asset.id,
@@ -367,7 +370,7 @@ async def ocr_document_assets(document_id: str, db: AsyncSession = Depends(get_d
         "assets": updated_assets
     }
     
-@app.post("/dpcuments/{document_id}/embed-assets")
+@app.post("/documents/{document_id}/embed-assets", include_in_schema=False)
 async def embed_document_assets(document_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(DocumentAsset).where(DocumentAsset.document_id == document_id).order_by(DocumentAsset.page_number))
     assets = result.scalars().all()

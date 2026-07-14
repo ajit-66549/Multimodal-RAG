@@ -63,8 +63,8 @@ function App() {
 
       const doc = documents.find((item) => item.id === documentId);
 
-      await api.post(`/documents/${documentId}/process`);
-      await api.post(`/documents/${documentId}/embed`);
+      await api.post(`/document/${documentId}/process`);
+      await api.post(`/document/${documentId}/embed`);
 
       if (doc?.file_type === ".pdf") {
         await api.post(`/documents/${documentId}/extract-images`);
