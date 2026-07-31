@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { api } from "./api.js"
 
 const statusLabels = {
@@ -26,10 +26,10 @@ function App() {
 
   const [question, setQuestion] = useState("");
   const [selectedDocument, setSelectedDocument] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [sources, setSources] = useState([]);
+  const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [assetUrls, setAssetUrls] = useState({});
+  const conversationEndRef = useRef(null);
 
   const readyDocuments = useMemo(
     () => documents.filter((document) => document.status === "ready"),
@@ -117,7 +117,8 @@ function App() {
   };
 
   const askQuestion = async () => {
-    if (!question.trim()) {
+    const submittedQuestion = question.trim();
+    if (!submittedQuestion) {
       showNotice("error", "Enter a question before asking the assistant.");
       return;
     }
@@ -129,17 +130,27 @@ function App() {
 
     try {
       setLoading(true);
-      setAnswer("");
-      setSources([]);
+      setQuestion("");
+      setMessages((current) => [
+        ...current,
+        { id: crypto.randomUUID(), role: "user", content: submittedQuestion },
+      ]);
 
       const response = await api.post("/chat", null, {
-        params: { question, top_k: 5, document_id: [selectedDocument] },
+        params: { question: submittedQuestion, top_k: 5, document_id: [selectedDocument] },
       });
 
-      setAnswer(response.data.answer);
-
-      setSources(response.data.sources || []);
-      (response.data.sources || []).forEach((source) => {
+      const responseSources = response.data.sources || [];
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: response.data.answer,
+          sources: responseSources,
+        },
+      ]);
+      responseSources.forEach((source) => {
         if (source.asset_id) loadAssetUrl(source.asset_id);
       });
     } catch (error) {
@@ -150,6 +161,13 @@ function App() {
     }
   };
 
+  const handleComposerKeyDown = (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!loading) askQuestion();
+    }
+  };
+
 
   useEffect(() => {
     // Fetch once on mount so the dashboard opens with the current document pipeline.
@@ -157,6 +175,10 @@ function App() {
     fetchDocuments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [messages, loading]);
 
 
 
@@ -193,7 +215,90 @@ function App() {
         </div>
       </section>
 
-      <section className="content-grid">
+      <section className="chat-panel" id="ask">
+        <header className="chat-header">
+          <div className="assistant-identity">
+            <span className="assistant-avatar" aria-hidden="true">✦</span>
+            <div>
+              <h2>Research assistant</h2>
+              <span className="online-label"><span /> Ready to search your documents</span>
+            </div>
+          </div>
+          <select
+            className="document-selector"
+            aria-label="Document to search"
+            value={selectedDocument}
+            onChange={(e) => setSelectedDocument(e.target.value)}
+          >
+            <option value="">Select a ready document</option>
+            {readyDocuments.map((doc) => (
+              <option key={doc.id} value={doc.id}>{doc.filename}</option>
+            ))}
+          </select>
+        </header>
+
+        <div className="conversation" aria-live="polite">
+          {messages.length === 0 && (
+            <div className="chat-welcome">
+              <span className="welcome-icon">✦</span>
+              <h2>What would you like to know?</h2>
+              <p>Select a ready document, then ask about its text, tables, figures, or procedures.</p>
+              <div className="prompt-suggestions">
+                {["Summarize the key findings", "What do the figures show?", "List the main recommendations"].map((prompt) => (
+                  <button key={prompt} type="button" onClick={() => setQuestion(prompt)}>{prompt}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.map((message) => (
+            <article className={`message message-${message.role}`} key={message.id}>
+              <div className="message-avatar" aria-hidden="true">{message.role === "assistant" ? "✦" : "You"}</div>
+              <div className="message-body">
+                <span className="message-author">{message.role === "assistant" ? "Research assistant" : "You"}</span>
+                <p>{message.content}</p>
+                {message.sources?.length > 0 && (
+                  <details className="sources-details">
+                    <summary>{message.sources.length} sources used</summary>
+                    <div className="source-grid">
+                      {message.sources.map((source, index) => (
+                        <article className="source-card" key={`${message.id}-${source.asset_id || source.page_number}-${index}`}>
+                          <div className="source-meta">Source {index + 1} · Page {source.page_number} · {source.source_type}</div>
+                          <p>{source.preview}</p>
+                          {source.asset_id && assetUrls[source.asset_id] && <img src={assetUrls[source.asset_id]} alt="Retrieved visual source" />}
+                        </article>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            </article>
+          ))}
+          {loading && (
+            <article className="message message-assistant">
+              <div className="message-avatar" aria-hidden="true">✦</div>
+              <div className="message-body"><span className="message-author">Research assistant</span><div className="typing"><span /><span /><span /></div></div>
+            </article>
+          )}
+          <div ref={conversationEndRef} />
+        </div>
+
+        <div className="composer-wrap">
+          <div className="composer">
+            <textarea
+              aria-label="Message the research assistant"
+              placeholder={selectedDocument ? "Message the research assistant…" : "Select a ready document to begin…"}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={handleComposerKeyDown}
+              rows="1"
+            />
+            <button className="send-button" aria-label="Send message" onClick={askQuestion} disabled={loading || !question.trim() || !selectedDocument}>↑</button>
+          </div>
+          <small>Answers are grounded in the selected document. Press Enter to send · Shift + Enter for a new line.</small>
+        </div>
+      </section>
+
+      <section className="content-grid workspace-grid">
         <div className="panel upload-panel">
           <div className="panel-heading">
             <p className="eyebrow">Step 1</p>
@@ -208,26 +313,16 @@ function App() {
           <button className="button button-primary" onClick={uploadDocument}>Upload document</button>
         </div>
 
-        <div className="panel" id="ask">
+        <div className="panel">
           <div className="panel-heading">
-            <p className="eyebrow">Step 3</p>
-            <h2>Ask with evidence</h2>
+            <p className="eyebrow">Workspace</p>
+            <h2>Chat tips</h2>
           </div>
-          <select value={selectedDocument} onChange={(e) => setSelectedDocument(e.target.value)}>
-            <option value="">Select a ready document</option>
-            {readyDocuments.map((doc) => (
-              <option key={doc.id} value={doc.id}>{doc.filename}</option>
-              ))}
-          </select>
-          <textarea
-            placeholder="Ask about figures, tables, procedures, or document details..."
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            rows="4"
-          />
-          <button className="button button-primary" onClick={askQuestion} disabled={loading}>
-            {loading ? "Searching evidence..." : "Ask assistant"}
-          </button>
+          <ul className="tips-list">
+            <li>Ask follow-up questions without losing earlier answers.</li>
+            <li>Open the source list beneath any response to inspect its evidence.</li>
+            <li>Choose a different document from the conversation header at any time.</li>
+          </ul>
         </div>
       </section>
 
@@ -269,25 +364,6 @@ function App() {
         )}
       </section>
 
-      <section className="panel answer-panel">
-        <div className="panel-heading">
-          <p className="eyebrow">Result</p>
-          <h2>Answer</h2>
-        </div>
-        {!answer && <div className="empty-state">Your grounded answer and retrieved source cards will appear here.</div>}
-        {answer && <p className="answer-text">{answer}</p>}
-        {sources.length > 0 && (
-          <div className="source-grid">
-            {sources.map((source, index) => (
-              <article className="source-card" key={`${source.asset_id || source.page_number}-${index}`}>
-                <div className="source-meta">Source {index + 1} · Page {source.page_number} · {source.source_type}</div>
-                <p>{source.preview}</p>
-                {source.asset_id && assetUrls[source.asset_id] && <img src={assetUrls[source.asset_id]} alt="Retrieved visual source" />}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
     </main>
   )
 }
