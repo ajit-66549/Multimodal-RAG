@@ -1,3 +1,4 @@
+import os
 from uuid import uuid4
 from pathlib import Path
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from typing import Annotated
 from fastapi import Query
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 from app.database import get_db
 from app.storage_paths import UPLOAD_DIR
@@ -22,13 +24,20 @@ from app.ocr_service import extract_text_from_image
 from app.s3_service import upload_file_to_s3, get_s3_object_byte, generate_presigned_URL, delete_s3_object
 from app.asset_storage import upload_extracted_assets
 
-ALLOWED_EXTENSIONS = {".pdf", ".csv", ".txt", ".png", ".jpg", ".jpeg"}
+ALLOWED_EXTENSIONS = {".pdf", ".csv"}
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
+    ).split(",")
+    if origin.strip()
+]
     
 app = FastAPI(title="HPC Multimodal RAG Analyzer")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -90,7 +99,7 @@ async def list_documents(db: AsyncSession = Depends(get_db)):
     documents = result.scalars().all()
     return documents
 
-@app.get("/documents/{documents_id}")
+@app.get("/documents/{document_id}")
 async def get_document(document_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Documents).where(Documents.id == document_id))
     document = result.scalar_one_or_none()

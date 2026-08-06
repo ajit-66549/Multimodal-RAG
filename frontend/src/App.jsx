@@ -67,7 +67,6 @@ function App() {
       await api.post(`/document/${documentId}/embed`);
 
       if (doc?.file_type === ".pdf") {
-        await api.post(`/documents/${documentId}/extract-images`);
         await api.post(`/documents/${documentId}/ocr-assets`);
         await api.post(`/documents/${documentId}/embed-assets`);
       }
@@ -307,8 +306,8 @@ function App() {
           <label className="dropzone" htmlFor="file-upload">
             <span className="upload-icon">↑</span>
             <strong>{file ? file.name : "Drop in a document"}</strong>
-            <small>PDFs unlock image extraction, OCR, and asset search.</small>
-            <input id="file-upload" type="file" onChange={(e) => setFile(e.target.files[0])} />
+            <small>PDFs unlock image extraction, OCR, and asset search; CSV files support structured analysis.</small>
+            <input id="file-upload" type="file" accept=".pdf,.csv" onChange={(e) => setFile(e.target.files[0])} />
           </label>
           <button className="button button-primary" onClick={uploadDocument}>Upload document</button>
         </div>

@@ -1,360 +1,157 @@
 # HPC Multimodal RAG Analyzer
 
-A full-stack AI application that extracts knowledge from technical documents using **Multimodal Retrieval-Augmented Generation (RAG)**. The system processes both textual and visual content by combining OCR, semantic vector search, Amazon S3, ChromaDB, and Large Language Models to generate grounded answers with supporting sources.
+A full-stack retrieval-augmented generation application for asking grounded questions about PDF and CSV documents. PDF pages are indexed as text and as OCR-enriched images, allowing answers to cite textual and visual evidence.
 
----
+## Current capabilities
 
-## Overview
+- Upload and process PDF and CSV files.
+- Extract and token-chunk PDF text with page metadata.
+- Build CSV overview, missing-value, numeric, categorical, and complete-row chunks.
+- Render PDF pages as images, store them in Amazon S3, and caption them with Tesseract OCR.
+- Generate OpenAI embeddings and persist them in a local ChromaDB collection.
+- Store document, chunk, asset, and processing-status metadata in PostgreSQL.
+- Ask questions against a selected ready document and display deduplicated sources.
+- Remove a document and its local files, S3 assets, database records, and vectors.
 
-Traditional RAG systems primarily retrieve information from document text while ignoring valuable information contained in figures, diagrams, and images.
+The application does **not** currently process TXT or standalone image uploads. Authentication, background jobs, automated retries, and production cloud infrastructure are also outside the current implementation.
 
-The **HPC Multimodal RAG Analyzer** extends a standard RAG pipeline by processing both textual and visual content from uploaded documents. During ingestion, the application extracts document text, captures embedded images, generates OCR captions, stores visual assets securely in Amazon S3, creates vector embeddings, and indexes all content in ChromaDB for semantic retrieval.
+## Architecture
 
-When a user asks a question, the system retrieves the most relevant document chunks, grounds the response with supporting evidence, and displays both textual and visual sources whenever applicable.
+```text
+React UI (browser)
+  └── FastAPI API
+        ├── PostgreSQL: document/chunk/asset metadata
+        ├── local storage: uploads and persistent ChromaDB vectors
+        ├── Amazon S3: extracted PDF page images
+        ├── Tesseract: OCR of extracted images
+        └── OpenAI API: embeddings and grounded answer generation
+```
 
----
+The detailed ingestion and retrieval flows are documented in [`docs/architecture.md`](docs/architecture.md).
 
-# Features
+## Technology stack
 
-- Upload PDF, CSV, and TXT documents
-- Extract text and embedded images from PDF files
-- Generate OCR captions for visual content
-- Store extracted assets securely in Amazon S3
-- Generate semantic embeddings for document chunks
-- Store vector embeddings in ChromaDB
-- Ask natural language questions about uploaded documents
-- Retrieve grounded answers with supporting sources
-- Display both text and image references
-- Dockerized frontend, backend, and PostgreSQL
-- Automatic Alembic database migrations during container startup
-- One-command project startup using Docker Compose
+| Area | Technologies |
+| --- | --- |
+| Frontend | React 19, Vite 8, Axios, Nginx |
+| API | FastAPI, Pydantic, Uvicorn |
+| Persistence | PostgreSQL 16, SQLAlchemy, Alembic, ChromaDB |
+| Document processing | PyPDF, PyMuPDF, pandas, Tesseract OCR |
+| AI | OpenAI embeddings and chat completions |
+| Assets | Amazon S3 and presigned URLs |
+| Packaging | Docker and Docker Compose |
 
----
+## Repository layout
 
-# System Architecture
+```text
+.
+├── backend/
+│   ├── app/                 # ingestion, storage, AI, and database services
+│   ├── migrations/          # Alembic migration history
+│   ├── .env.example         # required backend configuration template
+│   ├── main.py              # FastAPI routes and pipeline orchestration
+│   └── start.sh             # migrations followed by API startup
+├── docs/architecture.md
+├── frontend/
+│   ├── src/                 # React application and API client
+│   ├── Dockerfile           # Vite build and Nginx runtime
+│   └── README.md            # frontend-specific development notes
+└── docker-compose.yml
+```
 
-User Upload → FastAPI → PostgreSQL + Local Document Storage + S3 Asset Storage → Text/CSV/Image Processing → Embeddings → ChromaDB → Retrieval → LLM Answer
+## Prerequisites
 
----
+- Docker with the Compose plugin
+- An OpenAI API key
+- An S3 bucket and AWS credentials with access to the `document-assets/` prefix
 
-# Tech Stack
+Running the backend directly also requires Python 3.13, PostgreSQL, and the `tesseract` executable. Running the frontend directly requires Node.js 24.
 
-## Frontend
+## Configuration
 
-- React
-- Vite
-- JavaScript
-- CSS
+Create the ignored runtime environment file from the committed template:
 
-## Backend
+```bash
+cp backend/.env.example backend/.env
+```
 
-- FastAPI
-- SQLAlchemy
-- Alembic
-- Pydantic
+Set these values in `backend/.env`:
 
-## Database
+| Variable | Purpose |
+| --- | --- |
+| `OPENAI_API_KEY` | OpenAI embeddings and answer generation |
+| `AWS_REGION` | Region containing the S3 bucket |
+| `AWS_S3_BUCKET` | Bucket used for extracted PDF page images |
+| `AWS_ACCESS_KEY_ID` | Optional when another standard boto3 credential source is available |
+| `AWS_SECRET_ACCESS_KEY` | Optional when another standard boto3 credential source is available |
+| `AWS_SESSION_TOKEN` | Optional for temporary credentials |
+| `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API |
 
-- PostgreSQL
+Docker Compose supplies the container-specific `DATABASE_URL`, so the template's localhost database URL is mainly for direct backend execution.
 
-## Vector Database
-
-- ChromaDB
-
-## AI
-
-- OpenAI API
-- Retrieval-Augmented Generation (RAG)
-- OCR
-
-## Cloud
-
-- Amazon S3
-- Presigned URLs
-
-## DevOps
-
-- Docker
-- Docker Compose
-
----
-
-## S3 configuration
-
-Set `AWS_REGION` and `AWS_S3_BUCKET` in `backend/.env`. Boto3 uses its standard
-credential chain, so local development can also set `AWS_ACCESS_KEY_ID` and
-`AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` for temporary credentials).
-
-The application uploads, reads, and deletes objects below the
-`document-assets/` prefix. Its IAM principal therefore needs this policy (replace
-the bucket name if necessary):
+The S3 principal needs permission to list the asset prefix and read, write, and delete its objects. Adapt the bucket name below:
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ListDocumentAssets",
       "Effect": "Allow",
       "Action": "s3:ListBucket",
-      "Resource": "arn:aws:s3:::hpc-rag-assets",
-      "Condition": {
-        "StringLike": { "s3:prefix": ["document-assets/*"] }
-      }
+      "Resource": "arn:aws:s3:::YOUR_BUCKET",
+      "Condition": {"StringLike": {"s3:prefix": ["document-assets/*"]}}
     },
     {
-      "Sid": "ManageDocumentAssets",
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-      "Resource": "arn:aws:s3:::hpc-rag-assets/document-assets/*"
+      "Resource": "arn:aws:s3:::YOUR_BUCKET/document-assets/*"
     }
   ]
 }
 ```
 
-The AWS account number in a user ARN identifies its account, but does not grant
-S3 permissions. Attach an identity policy like the one above to the IAM user or
-role, and also check the bucket policy, permissions boundary, and organization
-SCP for an explicit deny. A missing object can appear as HTTP 403 rather than 404
-when the principal lacks `s3:ListBucket`; verify that database `asset_path`
-values begin with `document-assets/`.
-
----
-
-# Project Structure
-
-```
-hpc-rag-analyzer/
-
-├── backend/
-│   ├── app/
-│   ├── migrations/
-│   ├── main.py
-│   ├── start.sh
-│   ├── Dockerfile
-│   └── requirements.txt
-│
-├── frontend/
-│   ├── src/
-│   ├── public/
-│   ├── Dockerfile
-│   ├── nginx.conf
-│   └── package.json
-│
-├── docker-compose.yml
-│
-└── README.md
-```
-
----
-
-# How It Works
-
-### 1. Upload
-
-The user uploads a supported document.
-
-Supported formats:
-
-- PDF
-- CSV
-- TXT
-
----
-
-### 2. Document Processing
-
-The backend:
-
-- extracts document text
-- extracts embedded images
-- generates OCR captions
-- stores image assets in Amazon S3
-- chunks document text
-- generates vector embeddings
-- stores vectors in ChromaDB
-- stores metadata in PostgreSQL
-
----
-
-### 3. Retrieval
-
-When the user submits a question:
-
-- the question is embedded
-- similar document chunks are retrieved from ChromaDB
-- relevant sources are collected
-- visual references are retrieved from S3 when available
-
----
-
-### 4. Answer Generation
-
-The retrieved context is sent to the LLM to generate a grounded response.
-
-The application displays:
-
-- answer
-- source pages
-- supporting document chunks
-- related images (when available)
-
----
-
-# Getting Started
-
-## Clone the repository
-
-```bash
-git clone https://github.com/<your-username>/hpc-rag-analyzer.git
-
-cd hpc-rag-analyzer
-```
-
----
-
-## Configure Environment Variables
-
-Create:
-
-```
-backend/.env
-```
-
-Example:
-
-```env
-OPENAI_API_KEY=your_openai_api_key
-
-DATABASE_URL=postgresql+asyncpg://postgres:password@postgres:5432/hpc_rag_db
-
-AWS_ACCESS_KEY_ID=your_access_key
-
-AWS_SECRET_ACCESS_KEY=your_secret_key
-
-AWS_REGION=your_region
-
-AWS_S3_BUCKET=your_bucket_name
-```
-
----
-
-## Run the Entire Application
+## Run with Docker Compose
 
 ```bash
 docker compose up --build
 ```
 
-Docker Compose automatically:
+This starts PostgreSQL, applies Alembic migrations, starts FastAPI, and serves the production frontend through Nginx.
 
-- starts PostgreSQL
-- waits for the database
-- runs Alembic migrations
-- starts the FastAPI backend
-- builds the React frontend
+- Frontend: <http://localhost:3000>
+- API documentation: <http://localhost:8000/docs>
+- Health check: <http://localhost:8000/health>
+- PostgreSQL: `localhost:5432`
 
----
+Stop the application with `docker compose down`. Add `--volumes` only when you intentionally want to delete the PostgreSQL volume. Uploaded files and ChromaDB data are stored in the ignored repository-level `storage/` directory.
 
-Frontend:
+## Processing flow
 
-```
-http://localhost:5173
-```
+1. Upload a PDF or CSV from the browser.
+2. Select **Ingest**. The UI calls the processing and embedding endpoints in sequence.
+3. For a PDF, processing also extracts and uploads page images; the UI then runs OCR and embeds the captions.
+4. Select the ready document in the chat header and submit a question.
+5. FastAPI embeds the question, filters ChromaDB retrieval to that document, asks the LLM using the retrieved context, and returns source metadata.
 
-Backend:
+## Development checks
 
-```
-http://localhost:8000
-```
-
-API Documentation:
-
-```
-http://localhost:8000/docs
+```bash
+python -m compileall -q backend
+cd frontend && npm run lint
+cd frontend && npm run build
+docker compose config
 ```
 
----
+## Deployment readiness
 
-# Example Workflow
+The Docker images provide a reproducible application package, but the Compose file is a **local-development topology**, not a production deployment definition. Before internet-facing deployment:
 
-1. Upload a PDF document.
-2. Process the document.
-3. Ask a question.
+- provide managed PostgreSQL and durable storage for uploads and ChromaDB, or replace ChromaDB with a managed vector store;
+- inject secrets through the target platform instead of copying `.env` files into hosts or images;
+- set `VITE_API_BASE_URL` to the public HTTPS API URL at frontend build time;
+- configure the API's allowed CORS origins for the deployed frontend;
+- place both services behind TLS and add authentication, authorization, request-size limits, and rate limiting;
+- move ingestion/OCR/embedding work to background jobs for larger documents;
+- add automated backend tests, integration tests, backups, monitoring, and a restore procedure.
 
-Example:
-
-```
-What is Retrieval-Augmented Generation?
-```
-
-The system retrieves the most relevant document chunks, generates an answer using the LLM, and displays the supporting sources.
-
----
-
-# Dockerized Deployment
-
-The entire project is containerized.
-
-A single command launches:
-
-- React frontend
-- FastAPI backend
-- PostgreSQL database
-
-Database migrations are automatically executed during container startup using Alembic.
-
----
-
-# Future Improvements
-
-- Multi-document querying
-- Streaming LLM responses
-- User authentication
-- Conversation history
-- Citation highlighting
-- Hybrid keyword + semantic retrieval
-- Document summarization
-- Multi-user support
-
----
-
-# Learning Outcomes
-
-This project demonstrates experience with:
-
-- Full-stack application development
-- Retrieval-Augmented Generation (RAG)
-- FastAPI
-- React
-- PostgreSQL
-- Alembic migrations
-- ChromaDB
-- Amazon S3
-- Docker
-- Docker Compose
-- Semantic search
-- OCR
-- Cloud storage
-- REST APIs
-
----
-
-## 📸 Application Preview
-
-### Upload, Process, and Ask Questions
-
-The application allows users to upload technical documents, automatically extract text and visual assets, and ask grounded questions over the processed knowledge base.
-
-![Home Dashboard](docs/images/home-dashboard.png)
-
----
-
-### Grounded Responses with Citations
-
-Every answer includes traceable citations from indexed document chunks and extracted visual assets, helping users verify where the information originated.
-
-![Pipeline and Answer](docs/images/pipeline-answer.png)
-
-# License
-
-This project is licensed under the MIT License.
+These are deployment tasks rather than claims about the current local application. The current code and documentation now describe the same implemented file types and processing sequence.

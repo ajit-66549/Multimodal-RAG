@@ -35,11 +35,11 @@ def process_csv_into_chunks(file_path: str):
     for column, count in missing_values.items():
         missing_text += f"{column} has {count} missing values\n"
         
-    chunks.append({
-        "section": "missing_values",
-        "text": missing_text.strip(),
-        "token_count": len(missing_text.split())
-    })
+        chunks.append({
+            "section": "missing_values",
+            "text": missing_text.strip(),
+            "token_count": len(missing_text.split())
+        })
     
     numeric_columns = df.select_dtypes(include="number").columns
     if len(numeric_columns) > 0:
@@ -65,11 +65,11 @@ def process_csv_into_chunks(file_path: str):
         Top Values: {value_counts}
         """.strip()
     
-    chunks.append({
-        "Section": "categorical_summary",
-        "text": text,
-        "token_count": len(text.split())
-    })
+        chunks.append({
+            "section": "categorical_summary",
+            "text": text,
+            "token_count": len(text.split())
+        })
     
     row_batch_size = 25
     for start in range(0, len(df), row_batch_size):
@@ -77,10 +77,10 @@ def process_csv_into_chunks(file_path: str):
         row_lines = [row_to_text(index+1, row) for index, row in batch.iterrows()]
         
         text = "CSV Row Records (complete rows; use these to answer questions involving relationships between columns):\n"
-        text += "/n".join(row_lines)
+        text += "\n".join(row_lines)
         
         chunks.append({
-            "Section": "row_records",
+            "section": "row_records",
             "text": text,
             "token_count": len(text.split())
         })
