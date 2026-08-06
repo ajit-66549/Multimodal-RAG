@@ -1,10 +1,7 @@
 import fitz
 
-from pathlib import Path
 from uuid import uuid4
-
-ASSET_DIR = Path("../storage/assets")
-ASSET_DIR.mkdir(parents=True, exist_ok=True)
+from app.storage_paths import ASSET_DIR
 
 def extract_pdf_page_images(file_path: str, document_id: str):
     pdf = fitz.open(file_path)
@@ -30,3 +27,13 @@ def extract_pdf_page_images(file_path: str, document_id: str):
     pdf.close()
     
     return assets
+
+def delete_extracted_images(document_id: str) -> int:
+    """Delete locally generated page images for a document."""
+    deleted_count = 0
+    for image_path in ASSET_DIR.glob(f"{document_id}_page_*.png"):
+        if image_path.is_file():
+            image_path.unlink()
+            deleted_count += 1
+
+    return deleted_count

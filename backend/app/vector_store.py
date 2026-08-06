@@ -1,6 +1,7 @@
 import chromadb
+from app.storage_paths import CHROMA_DIR
 
-chroma_client = chromadb.PersistentClient("../storage/chroma_db")
+chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 collection = chroma_client.get_or_create_collection(name="hpc_document_chunks")
 
 def add_chunk_embedding(chunk_id: int, text: str, embedding: list[float], metadata: dict):

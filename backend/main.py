@@ -9,19 +9,17 @@ from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import get_db
+from app.storage_paths import UPLOAD_DIR
 from app.models import Documents, DocumentChunk, DocumentAsset
 from app.ingestion import process_pdf_into_chunks
 from app.embedding_service import create_embeddings
 from app.vector_store import add_chunk_embedding, query_chunks, add_asset_embedding, delete_document_embeddings
 from app.llm_services import generate_answer
 from app.csv_ingestion import process_csv_into_chunks
-from app.image_extraction import extract_pdf_page_images
+from app.image_extraction import extract_pdf_page_images, delete_extracted_images
 from app.ocr_service import extract_text_from_image
 
-from app.s3_service import upload_file_to_s3, get_s3_object_byte, generate_presigned_URL
-
-UPLOAD_DIR = Path("../storage/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+from app.s3_service import upload_file_to_s3, get_s3_object_byte, generate_presigned_URL, delete_s3_object
 
 ALLOWED_EXTENSIONS = {".pdf", ".csv", ".txt", ".png", ".jpg", ".jpeg"}
     
@@ -117,6 +115,16 @@ async def process_document(document_id: str, db: AsyncSession = Depends(get_db))
     
         if document.file_type == ".pdf":
             chunks = process_pdf_into_chunks(document.storage_path)
+            assets = extract_pdf_page_images(document.storage_path, document.id)
+
+            for asset in assets:
+                db_asset = DocumentAsset(
+                    document_id=document.id,
+                    page_number=asset["page_number"],
+                    asset_type=asset["asset_type"],
+                    asset_path=asset["asset_path"],
+                )
+                db.add(db_asset)
         elif document.file_type == ".csv":
             chunks = process_csv_into_chunks(document.storage_path)
         else:
@@ -141,6 +149,7 @@ async def process_document(document_id: str, db: AsyncSession = Depends(get_db))
             "document_id": document.id,
             "status": document.status,
             "chunk_token": document.chunk_count,
+            "extracted_assets": len(assets) if document.file_type == ".pdf" else 0,
             "processed_at": document.processed_at
         }
     except Exception as e:
@@ -203,11 +212,14 @@ async def delete_document(document_id: str, db: AsyncSession = Depends(get_db)):
     delete_document_embeddings(document_id)
     
     for asset in assets:
-        asset_path = Path(asset.asset_path)
-        if asset_path.exists():
-            asset_path.unlink()
-            
+        delete_s3_object(asset.asset_path)
         await db.delete(asset)
+        
+    delete_extracted_images(document_id)
+
+    uploaded_file = Path(document.storage_path)
+    if uploaded_file.is_file():
+        uploaded_file.unlink()
         
     for chunk in chunks:
         await db.delete(chunk)
