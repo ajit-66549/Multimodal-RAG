@@ -14,6 +14,7 @@ def generate_answer(question: str, context: str):
                 "content": (
                     "You are an HPC research assistant. "
                     "Answer only using the provided context. "
+                    "For CSV contexts, complete row records preserve relationships between columns; "
                     "If the answer is not in the context, say you don't know."
                 )},
             {
