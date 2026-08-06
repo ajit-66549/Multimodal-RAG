@@ -20,6 +20,7 @@ from app.image_extraction import extract_pdf_page_images, delete_extracted_image
 from app.ocr_service import extract_text_from_image
 
 from app.s3_service import upload_file_to_s3, get_s3_object_byte, generate_presigned_URL, delete_s3_object
+from app.asset_storage import upload_extracted_assets
 
 ALLOWED_EXTENSIONS = {".pdf", ".csv", ".txt", ".png", ".jpg", ".jpeg"}
     
@@ -115,7 +116,8 @@ async def process_document(document_id: str, db: AsyncSession = Depends(get_db))
     
         if document.file_type == ".pdf":
             chunks = process_pdf_into_chunks(document.storage_path)
-            assets = extract_pdf_page_images(document.storage_path, document.id)
+            extracted_assets = extract_pdf_page_images(document.storage_path, document.id)
+            assets = upload_extracted_assets(document.id, extracted_assets)
 
             for asset in assets:
                 db_asset = DocumentAsset(
@@ -327,16 +329,15 @@ async def extract_document_images(document_id: str, db:AsyncSession = Depends(ge
     if document.file_type != ".pdf":
         raise HTTPException(status_code=400, detail="Only PDF image extraction is supported right now")
     
-    assets = extract_pdf_page_images(document.storage_path, document_id)
+    extracted_assets = extract_pdf_page_images(document.storage_path, document_id)
+    assets = upload_extracted_assets(document.id, extracted_assets)
     
     for asset in assets:
-        s3_key = f"document-assets/{document.id}/page-{asset['page_number']}.png"
-        upload_file_to_s3(filename=asset["asset_path"], key=s3_key)
         db_asset = DocumentAsset(
             document_id=document.id,
             page_number=asset["page_number"],
             asset_type=asset["asset_type"],
-            asset_path=s3_key,
+            asset_path=asset["asset_path"],
         )
         db.add(db_asset)
     await db.commit()
